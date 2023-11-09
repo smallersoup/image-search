@@ -1,0 +1,6 @@
+gradio==4.1.2
+numpy==1.26.1
+pydantic==1.8.2
+pymilvus==2.2.4
+tcvectordb==1.0.3
+towhee==1.1.2
