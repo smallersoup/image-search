@@ -1,14 +1,14 @@
 import csv
+import torchvision.transforms as transforms
+from PIL import Image
+import pandas as pd
+import torch
+import torchvision.models as models
 from glob import glob
 from pathlib import Path
 import gradio as gr
-from towhee import pipe, ops, DataCollection
-
-# Towhee parameters
+from torchvision.models import ResNet50_Weights
 from reverse_image_search.tcvdb_client import TcvdbClient
-
-MODEL = 'resnet50'
-DEVICE = None  # if None, use default device (cuda is enabled if available)
 
 # tcvdb parameters
 HOST = 'lb-xxx.clb.ap-beijing.tencentclb.com'
@@ -21,6 +21,18 @@ USERNAME = 'root'
 
 # path to csv (column_1 indicates image path) OR a pattern of image paths
 INSERT_SRC = 'reverse_image_search.csv'
+
+# Test Image Path
+TEST_IMAGE_PATH = './test/goldfish/*.JPEG'
+
+# Initialize model
+# model = models.resnet50(pretrained=True)
+model = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
+
+# Set model to eval mode
+model = model.eval()
+model = torch.nn.Sequential(*(list(model.children())[:-1]))
+
 
 # Load image path
 def load_image(x):
@@ -35,83 +47,88 @@ def load_image(x):
             yield item
 
 
-def search_and_show_images(file_path):
-    # 使用 `file_path` 进行搜索，返回结果的路径
-    results = p_search(file_path)  # 假设 `p_search` 是你的搜索函数
-    # 从 'DataQueue' 对象中获取数据
-    data = results.get()
+# Embedding: Function to extract features from an image
+def extract_features(image_path):
+    transform = transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+    # Read the image Ensure the image is read as RGB
+    img = Image.open(image_path).convert('RGB')
+    img = transform(img)
+    img = img.unsqueeze(0)
+    feature = model(img)
+    # Reshape the features to 2D
+    feature = feature.view(feature.shape[0], -1)
+    return feature.detach().numpy()
 
-    # 获取 'pred' 字段的值，类如['/root/image-search/reverse_image_search/train/cuirass/n03146219_11082.JPEG',
-    # '/root/image-search/reverse_image_search/train/loudspeaker/n03691459_40992.JPEG',
-    # '/root/image-search/reverse_image_search/train/comic_book/n06596364_11921.JPEG',
-    # '/root/image-search/reverse_image_search/train/ski_mask/n04229816_6821.JPEG',
-    # '/root/image-search/reverse_image_search/train/traffic_light/n06874185_15185.JPEG',
-    # '/root/image-search/reverse_image_search/train/tiger_cat/n02123159_6503.JPEG',
-    # '/root/image-search/reverse_image_search/train/dishwasher/n03207941_15169.JPEG',
-    # '/root/image-search/reverse_image_search/train/steam_locomotive/n04310018_10624.JPEG',
-    # '/root/image-search/reverse_image_search/train/minibus/n03769881_619.JPEG',
-    # '/root/image-search/reverse_image_search/train/apiary/n02727426_948.JPEG']
-    pred = data[1]
-    return pred
+
+def display_multiple_embeddings(image_path_pattern):
+    # Use glob to get all matching image paths
+    image_paths = load_image(image_path_pattern)
+    # Process each image and collect the results
+    results = []
+    for img_path in image_paths:
+        feature = extract_features(img_path)
+        # Convert features to a pandas DataFrame
+        d = pd.DataFrame(feature)
+        results.append(d)
+
+    # Now 'results' is a list of DataFrames, one for each image.
+    # You can print them or manipulate them as you wish.
+    # Here we just print each one.
+    for d in results:
+        print(d)
+
+
+def search_similar_image(path):
+    for query_image in load_image(path):
+        features = extract_features(query_image)
+        search_res = tcvdb_client.search(features)
+        # Process the search results
+        # 获取 'pred' 字段的值，类如['/root/image-search/reverse_image_search/train/cuirass/n03146219_11082.JPEG',
+        # '/root/image-search/reverse_image_search/train/loudspeaker/n03691459_40992.JPEG',
+        # '/root/image-search/reverse_image_search/train/comic_book/n06596364_11921.JPEG',
+        # '/root/image-search/reverse_image_search/train/ski_mask/n04229816_6821.JPEG',
+        # '/root/image-search/reverse_image_search/train/traffic_light/n06874185_15185.JPEG',
+        # '/root/image-search/reverse_image_search/train/tiger_cat/n02123159_6503.JPEG',
+        # '/root/image-search/reverse_image_search/train/dishwasher/n03207941_15169.JPEG',
+        # '/root/image-search/reverse_image_search/train/steam_locomotive/n04310018_10624.JPEG',
+        # '/root/image-search/reverse_image_search/train/minibus/n03769881_619.JPEG',
+        # '/root/image-search/reverse_image_search/train/apiary/n02727426_948.JPEG']
+        pred = [str(Path(res[0]).resolve()) for res in search_res]
+        print("Query image:", query_image)
+        print("Search results:", pred)
+        return pred
 
 
 if __name__ == '__main__':
-    # test_vdb = Demo_TCVDB('vdb http url or ip and post', key='key get from web console', username='vdb username')
-    test_vdb = TcvdbClient(host=HOST, port=PORT, key='xxxxx', username='root',
-                           collectionName=COLLECTION_NAME, dbName=DB_NAME)
-    # test_vdb.clear()  # 测试前清理环境
-    # test_vdb.create_db_and_collection()
-
-    # Embedding pipeline
-    p_embed = (
-        pipe.input('src')
-            .flat_map('src', 'img_path', load_image)
-            .map('img_path', 'img', ops.image_decode())
-            .map('img', 'vec', ops.image_embedding.timm(model_name=MODEL, device=DEVICE))
-    )
+    # Initialize the TCVDB client
+    tcvdb_client = TcvdbClient(host=HOST, port=PORT, username=USERNAME, key=PASSWORD,
+                               dbName=DB_NAME, collectionName=COLLECTION_NAME, timeout=20)
+    # 测试前清理环境
+    # tcvdb_client.clear()
+    # tcvdb_client.create_db_and_collection()
 
     # Display embedding result, no need for implementation
-    p_display = p_embed.output('img_path', 'img', 'vec')
-    DataCollection(p_display('./test/goldfish/*.JPEG')).show()
-
-    # Insert pipeline
-    p_insert = (
-        p_embed.map(('img_path', 'vec'), 'mr', ops.local.tcvdb_client(
-            host=HOST, port=PORT, key=PASSWORD, username=USERNAME,
-            collectionName=COLLECTION_NAME, dbName=DB_NAME
-        ))
-            .output('mr')
-    )
+    display_multiple_embeddings(TEST_IMAGE_PATH)
 
     # Insert data
-    p_insert(INSERT_SRC)
+    # Read the CSV file to get all image paths, process each row and insert the features into the TCVDB
+    # for image_path in load_image(INSERT_SRC):
+    #     features = extract_features(image_path)
+    #     tcvdb_client.upsert(image_path, features)
 
-    # Search pipeline
-    p_search_pre = (
-        p_embed.map('vec', ('search_res'), ops.local.search_tcvdb_client(
-            host=HOST, port=PORT, key=PASSWORD, username=USERNAME,
-            collectionName=COLLECTION_NAME, dbName=DB_NAME))
-            .map('search_res', 'pred', lambda x: [str(Path(y[0]).resolve()) for y in x])
-        # .output('img_path', 'pred')
-    )
-    p_search = p_search_pre.output('img_path', 'pred')
+    # Search for example query image(s), process each query image and search in the TCVDB
+    # search_similar_image(TEST_IMAGE_PATH)
 
-    # Search for example query image(s)
-    # dc = p_search('test/goldfish/*.JPEG')
-    # DataCollection(dc).show()
-
+    # webui
     iface = gr.Interface(
-        fn=search_and_show_images,
-        # inputs=gr.inputs.File(type="file"),
-        inputs=gr.inputs.Textbox(default='test/goldfish/*.JPEG'),
-        outputs=gr.Gallery(label="最终的结果图片").style(height='auto', columns=4),
+        fn=search_similar_image,
+        inputs=gr.components.Textbox(value='test/goldfish/*.JPEG'),
+        outputs=gr.Gallery(label="最终的结果图片").style(height='auto'),
         title='Tencent vector db 案例: 以图搜图',
     )
     iface.launch()
-    #
-    # for row in dc.get():
-    #     print(row)
-    # test_vdb.upsert_data_test()
-    # test_vdb.query_data()
-    # test_vdb.update_and_delete()
-    # test_vdb.delete_and_drop()

@@ -1,6 +1,9 @@
-gradio==4.1.2
-numpy==1.26.1
-pydantic==1.8.2
+gradio~=3.23.0
+numpy~=1.26.1
+pandas~=2.1.2
+Pillow==10.1.0
 pymilvus==2.2.4
 tcvectordb==1.0.3
+torch==2.1.0
+torchvision==0.16.0
 towhee==1.1.2

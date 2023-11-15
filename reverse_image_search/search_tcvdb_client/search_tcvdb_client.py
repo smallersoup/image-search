@@ -1,5 +1,4 @@
 import numpy as np
-from towhee.operator import PyOperator, SharedType
 import json
 import tcvectordb
 from tcvectordb.model.enum import FieldType, IndexType, MetricType, EmbeddingModel, ReadConsistency
@@ -13,7 +12,7 @@ def print_object(obj):
             print(json.dumps(elem, indent=2))
 
 
-class SearchTcvdbClient(PyOperator):
+class SearchTcvdbClient():
     def __init__(self, host: str, port: str, username: str, key: str, dbName: str, collectionName: str,
                  timeout: int = 20, **kwargs):
         """
@@ -28,20 +27,6 @@ class SearchTcvdbClient(PyOperator):
 
         if 'limit' not in self.kwargs:
             self.kwargs['limit'] = 10
-
-        index_params = {
-            'FLAT': {'params': {'nprobe': 10}},
-            'IVF_FLAT': {'params': {'nprobe': 10}},
-            'IVF_SQ8': {'params': {'nprobe': 10}},
-            'IVF_PQ': {'params': {'nprobe': 10}},
-            'HNSW': {'params': {'ef': 10}},
-            'RHNSW_FLAT': {'params': {'ef': 10}},
-            'RHNSW_SQ': {'params': {'ef': 10}},
-            'RHNSW_PQ': {'params': {'ef': 10}},
-            'IVF_HNSW': {'params': {'nprobe': 10, 'ef': 10}},
-            'ANNOY': {'params': {'search_k': 10}},
-            'AUTOINDEX': {}
-        }
 
     def __call__(self, query: 'ndarray'):
         tcvdb_result = self.query_data(
@@ -97,14 +82,3 @@ class SearchTcvdbClient(PyOperator):
         # search_by_text_res = coll.searchByText(embeddingItems=embeddingItems,
         #                                        params=SearchParams(ef=200))
         # print_object(search_by_text_res.get('documents'))
-
-    @property
-    def shared_type(self):
-        return SharedType.NotShareable
-
-    # def __del__(self):
-    #     if connections.has_connection(self._connect_name):
-    #         try:
-    #             connections.disconnect(self._connect_name)
-    #         except:
-    #             pass
